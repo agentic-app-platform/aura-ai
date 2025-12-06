@@ -38,7 +38,7 @@ def extract_chat_query_tool(user_query: str) -> ChatQueryExtraction:
     """
     Uses an LLM to extract structured query parameters from natural language input.
     """
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
     # Use with_structured_output to force the LLM to return our schema
     structured_llm = llm.with_structured_output(ChatQueryExtraction)

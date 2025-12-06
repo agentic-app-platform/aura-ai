@@ -1,4 +1,4 @@
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, delete
 
 # Define the SQLite database file name
 sqlite_file_name = "database.db"
@@ -21,3 +21,13 @@ def get_session():
     """
     with Session(engine) as session:
         yield session
+
+
+def clear_table(table: type[SQLModel]):
+    """
+    Clears all rows from the given table.
+    """
+    with Session(engine) as session:
+        statement = delete(table)
+        session.exec(statement)
+        session.commit()

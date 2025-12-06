@@ -1,7 +1,9 @@
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
+from app.database import clear_table
 from app.graph import create_graph
+from app.schema import ChatQuery
 
 
 def run_test(test_name, initial_message, user_message1, user_message2, expected_flow):
@@ -83,8 +85,10 @@ if __name__ == "__main__":
     #     ["context_agent", "__interrupt__"],
     # )
 
+    clear_table(ChatQuery)
+
     run_test(
-        "Recommendation and Fitment",
+        "Recommendation and Fitment with multiple user input",
         "Recommend me some shirts",
         "I am going to thailand",
         "I am going for a beach party",
@@ -94,9 +98,17 @@ if __name__ == "__main__":
     run_test(
         "Test using ChatQuery state so that we don't ask input every time",
         "show me something in red",
-        "I am going to thailand",
-        "I am going for a beach party",
+        "",
+        "",
         ["context_agent", "research_agent", "styling_agent"],
+    )
+
+    run_test(
+        "Test General QnA",
+        "what is capital of belgium",
+        "",
+        "",
+        ["context_agent"],
     )
 
     # # Test 2: Refinement (Matching Pant) -> Research -> Styling
