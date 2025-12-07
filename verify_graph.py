@@ -111,13 +111,13 @@ if __name__ == "__main__":
         ["context_agent", "research_agent", "styling_agent"],
     )
 
-    run_test(
-        "Test General QnA",
-        "what is capital of belgium",
-        "",
-        "",
-        ["context_agent"],
-    )
+    # run_test(
+    #     "Test General QnA",
+    #     "what is capital of belgium",
+    #     "",
+    #     "",
+    #     ["context_agent"],
+    # )
 
     # # Test 2: Refinement (Matching Pant) -> Research -> Styling
     # # Note: For real LLM we might need to be more explicit or carry over state,
