@@ -11,6 +11,7 @@ class UserProfile(TypedDict):
     skin_tone: Optional[str]
     preferences: List[str]
     sizes: Optional[dict]
+    photo_urls: Optional[List[str]]  # S3 URLs of user photos
 
 
 class AgentState(TypedDict):
@@ -23,3 +24,4 @@ class AgentState(TypedDict):
     current_agent: Optional[str]
     thread_id: int
     chat_query_json: Optional[ChatQuery]
+    merged_image_embeddings: Optional[List[Any]]  # List of numpy arrays or embeddings
