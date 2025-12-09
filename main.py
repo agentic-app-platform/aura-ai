@@ -5,15 +5,20 @@ Provides REST API endpoints for LangGraph-based shopping assistant.
 
 from contextlib import asynccontextmanager
 
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+import psycopg
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+import asyncpg
 
 from api_models import ChatRequest, ChatResponse
 from app.graph import create_graph
 from app.database import create_db_and_tables
+from app.config import DATABASE_URL
 from langchain_core.messages import HumanMessage
 import uuid
-
 
 # Global variable to store compiled graph
 compiled_graph = None
@@ -30,9 +35,22 @@ async def lifespan(app: FastAPI):
 
     # Compile LangGraph (expensive operation - do once at startup)
     global compiled_graph
-    compiled_graph = create_graph()
-    print("✅ LangGraph compiled and ready")
 
+    # Initialize PostgreSQL checkpointer
+    # Adjust URL for asyncpg if needed (create_pool usually handles postgres://)
+    # asyncpg usually expects postgresql://
+    # Note: app/database.py converts to postgresql+asyncpg:// for SQLAlchemy,
+    # but asyncpg directly uses postgresql://.
+    pg_url = DATABASE_URL
+    if "postgresql+asyncpg://" in pg_url:
+            pg_url = pg_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    # Compile LangGraph (expensive operation - do once at startup)
+    # conn = await asyncpg.connect(pg_url)
+    conn = await psycopg.AsyncConnection.connect(DATABASE_URL)
+    checkpointer = AsyncPostgresSaver(conn)
+    compiled_graph = create_graph(checkpointer)
+    print("✅ LangGraph compiled with PostgreSQL checkpointer")
     yield
 
     # Shutdown: Cleanup if needed
@@ -104,8 +122,8 @@ async def chat(request: ChatRequest):
             }
         }
 
-        # Invoke the graph
-        result = compiled_graph.invoke(input_data, config)
+        # Invoke the graph asynchronously
+        result = await compiled_graph.ainvoke(input_data, config)
 
         # Extract response from messages
         last_message = result["messages"][-1]
@@ -123,6 +141,8 @@ async def chat(request: ChatRequest):
 
     except Exception as e:
         print(f"Error processing chat request: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500, detail=f"Error processing request: {str(e)}"
         )

@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional, List
 import numpy as np
 
@@ -13,7 +14,7 @@ from app.tools.embedding import EmbeddingService
 import uuid
 
 
-def styling_agent(
+async def styling_agent(
     state: AgentState, config: RunnableConfig, *, store: Optional[BaseStore] = None
 ):
     """
@@ -55,7 +56,7 @@ def styling_agent(
 
     # Initialize services
     image_merging_service = ImageMergingService()
-    embedding_service = EmbeddingService()
+    # embedding_service = EmbeddingService()
 
     # Process each user photo × each product combination
     styled_products: List[ProductWithEmbedding] = []
@@ -63,33 +64,32 @@ def styling_agent(
 
     all_merged_images = []
 
-    # For each user photo, merge with all products
+    async def process_single_merge(user_photo_url, product):
+        try:
+            # Merge user photo with product image using Gemini 3 Pro Image Preview
+            merged_image = await image_merging_service.merge_images(
+                user_photo_url, product.image
+            )
+            merged_image.save(f"merged_image-{uuid.uuid4().hex}.jpg")
+            return merged_image
+        except Exception as e:
+            print(
+                f"Error processing product {product.title} with user photo {user_photo_url}: {e}"
+            )
+            return None
+
+    # Create tasks for all combinations
+    tasks = []
     for user_photo_url in user_photo_urls:
         for product in search_results:
-            try:
-                # Merge user photo with product image using Gemini 3 Pro Image Preview
-                merged_image = image_merging_service.merge_images(
-                    user_photo_url, product.image
-                )
-                merged_image.save(f"merged_image-{uuid.uuid4().hex}.jpg")
-                all_merged_images.append(merged_image)
-                # # Generate embedding for merged image
-                # embedding = embedding_service.get_image_embedding(merged_image)
+            tasks.append(process_single_merge(user_photo_url, product))
 
-                # # Create ProductWithEmbedding with all product info + embedding
-                # styled_product = ProductWithEmbedding.from_product(
-                #     product=product,
-                #     embedding=embedding,
-                #     user_photo_url=user_photo_url,
-                # )
-                # styled_products.append(styled_product)
-                # processed_count += 1
+    # Run tasks concurrently
+    results = await asyncio.gather(*tasks)
+    
+    # Filter out None results
+    all_merged_images = [img for img in results if img is not None]
 
-            except Exception as e:
-                print(
-                    f"Error processing product {product.title} with user photo {user_photo_url}: {e}"
-                )
-                continue
     return {
         "messages": [AIMessage(content="Here are your product recommendations!")],
         "current_agent": "styling_agent",
