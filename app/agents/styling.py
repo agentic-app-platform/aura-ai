@@ -10,6 +10,8 @@ from app.schema import ProductWithEmbedding
 from app.tools.image_merging import ImageMergingService
 from app.tools.embedding import EmbeddingService
 
+import uuid
+
 
 def styling_agent(
     state: AgentState, config: RunnableConfig, *, store: Optional[BaseStore] = None
@@ -59,6 +61,8 @@ def styling_agent(
     styled_products: List[ProductWithEmbedding] = []
     processed_count = 0
 
+    all_merged_images = []
+
     # For each user photo, merge with all products
     for user_photo_url in user_photo_urls:
         for product in search_results:
@@ -67,7 +71,8 @@ def styling_agent(
                 merged_image = image_merging_service.merge_images(
                     user_photo_url, product.image
                 )
-                merged_image.save("merged_image.jpg")
+                merged_image.save(f"merged_image-{uuid.uuid4().hex}.jpg")
+                all_merged_images.append(merged_image)
                 # # Generate embedding for merged image
                 # embedding = embedding_service.get_image_embedding(merged_image)
 
@@ -86,9 +91,10 @@ def styling_agent(
                 )
                 continue
     return {
-        "messages": [AIMessage(content="I couldn't find any items to style.")],
+        "messages": [AIMessage(content="Here are your product recommendations!")],
         "current_agent": "styling_agent",
         "next_step": None,
+        "merged_images": all_merged_images,
     }
 
     # if not styled_products:
