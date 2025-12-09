@@ -63,3 +63,4 @@ def set_beauty_standard_embedding(embedding: np.ndarray, save_path: Optional[str
     np.save(save_path, embedding)
     print(f"Beauty standard embedding saved to {save_path}")
 
+

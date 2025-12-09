@@ -42,3 +42,4 @@ set_beauty_standard_embedding(embedding, save_path="path/to/embedding.npy")
 
 The embedding should be saved as a NumPy array file (`.npy` format) with shape `(768,)`.
 
+

@@ -25,3 +25,4 @@ def compute_cosine_similarity(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
 
     return np.dot(vec_a, vec_b) / (norm_a * norm_b)
 
+
