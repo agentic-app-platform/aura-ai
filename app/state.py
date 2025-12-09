@@ -3,7 +3,7 @@ from typing import Any, List, Optional, TypedDict
 from langgraph.graph.message import add_messages
 from typing_extensions import Annotated
 
-from app.schema import ChatQuery, Product
+from app.schema import ChatQuery, Product, ProductWithEmbedding
 
 
 class UserProfile(TypedDict):
@@ -24,4 +24,4 @@ class AgentState(TypedDict):
     current_agent: Optional[str]
     thread_id: int
     chat_query_json: Optional[ChatQuery]
-    merged_image_embeddings: Optional[List[Any]]  # List of numpy arrays or embeddings
+    styled_products: Optional[List[ProductWithEmbedding]]  # Products with embeddings for merged images

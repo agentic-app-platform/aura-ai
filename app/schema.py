@@ -1,5 +1,6 @@
-from typing import Optional
+from typing import Optional, Any
 
+import numpy as np
 from pydantic import BaseModel, Field
 from sqlmodel import Field as SQLField, SQLModel
 
@@ -39,6 +40,53 @@ class Product(BaseModel):
             "link": ["link", "product_link"],
             "price": ["price"],
         }
+
+
+class ProductWithEmbedding(BaseModel):
+    """
+    Product with embedding vector for merged image.
+    Used by styling agent to return products with their styling embeddings.
+    """
+    # All Product fields
+    image: str = Field(description="Product image URL (thumbnail)", min_length=1)
+    price: str = Field(description="Product price", min_length=1)
+    link: str = Field(description="Product link/URL", min_length=1)
+    rating: Optional[float] = Field(default=None, description="Product rating (0-5 scale)")
+    title: str = Field(default="", description="Product title/name")
+    source: str = Field(default="", description="Product source/store")
+    reviews: Optional[int] = Field(default=None, description="Number of reviews")
+    
+    # Additional fields for styling
+    embedding: Any = Field(description="Vector embedding (768-dim) for merged image (user + product)")
+    user_photo_url: Optional[str] = Field(default=None, description="User photo URL used for merging")
+    merged_image_url: Optional[str] = Field(default=None, description="URL of merged image (if saved)")
+    
+    @classmethod
+    def from_product(
+        cls, product: Product, embedding: np.ndarray, user_photo_url: Optional[str] = None
+    ) -> "ProductWithEmbedding":
+        """
+        Create ProductWithEmbedding from Product and embedding.
+
+        Args:
+            product: Original Product instance
+            embedding: Vector embedding for merged image
+            user_photo_url: Optional user photo URL used
+
+        Returns:
+            ProductWithEmbedding instance
+        """
+        return cls(
+            image=product.image,
+            price=product.price,
+            link=product.link,
+            rating=product.rating,
+            title=product.title,
+            source=product.source,
+            reviews=product.reviews,
+            embedding=embedding.tolist() if isinstance(embedding, np.ndarray) else embedding,
+            user_photo_url=user_photo_url,
+        )
 
 
 class ChatQuery(SQLModel, table=True):
