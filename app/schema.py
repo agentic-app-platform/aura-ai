@@ -42,6 +42,18 @@ class Product(BaseModel):
         }
 
 
+class UserEmbedding(BaseModel):
+    """
+    User embedding profile for ranking and matching.
+    Contains various embeddings representing user preferences.
+    """
+    style_embedding: Any = Field(description="User style preference embedding")
+    brand_embedding: Any = Field(description="User brand preference embedding")
+    color_embedding: Any = Field(description="User color preference embedding")
+    intent_embedding: Any = Field(description="User conversation/intent embedding")
+    face_embedding: Any = Field(description="User face embedding")
+
+
 class ProductWithEmbedding(BaseModel):
     """
     Product with embedding vector for merged image.
