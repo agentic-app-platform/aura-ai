@@ -1,0 +1,72 @@
+name: Build and Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - deploy-gcloud  # Triggers on direct push OR when PR is merged to deploy-gcloud
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+env:
+  PROJECT_ID: high-torch-480505-c4
+  SERVICE_NAME: aura-ai
+  REGION: us-central1
+  IMAGE: gcr.io/high-torch-480505-c4/aura-ai
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Option 1: Workload Identity Federation (Recommended - no keys needed)
+      # - name: Authenticate to Google Cloud
+      #   uses: google-github-actions/auth@v2
+      #   with:
+      #     workload_identity_provider: 'projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_NAME/providers/PROVIDER_NAME'
+      #     service_account: 'SA_NAME@PROJECT_ID.iam.gserviceaccount.com'
+
+      # Option 2: Service Account Key (simpler setup)
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker --quiet
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.IMAGE }}:${{ github.sha }} .
+          docker tag ${{ env.IMAGE }}:${{ github.sha }} ${{ env.IMAGE }}:latest
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.IMAGE }}:${{ github.sha }}
+          docker push ${{ env.IMAGE }}:latest
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.IMAGE }}:${{ github.sha }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --quiet
+
+      - name: Show deployment URL
+        run: |
+          echo "✅ Deployed successfully!"
+          gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)'
+
