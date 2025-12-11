@@ -112,11 +112,11 @@ async def styling_agent(
     selected_user_photo = random.choice(user_photo_urls)
     print(f"Selected random user photo: {selected_user_photo[:50]}...")
 
-    # Select only ONE product (first product) to save costs
-    # User can increase this number later if needed
-    selected_product = search_results[0]
-    print(f"Selected product for merging: {selected_product.title if hasattr(selected_product, 'title') else 'Product'}")
-    print(f"Note: Merging only 1 product to save API costs. Can be increased later.")
+    # Select 2 products (first 2 products) to merge
+    selected_products = search_results[:2]
+    print(f"Selected {len(selected_products)} products for merging:")
+    for i, product in enumerate(selected_products, 1):
+        print(f"  {i}. {product.title if hasattr(product, 'title') else 'Product'}")
 
     # Initialize services
     image_merging_service = ImageMergingService()
@@ -132,71 +132,89 @@ async def styling_agent(
             "styled_products": [],
         }
 
-    # Merge only one combination: random user photo × first product
-    styled_products = []
-    merged_image_urls = []
-    
-    try:
-        print(f"Merging user photo with product image...")
-        merged_image = await image_merging_service.merge_images(
-            selected_user_photo, selected_product.image
-        )
-        
-        # Generate embedding for merged image
-        print(f"Generating embedding for merged image...")
-        embedding = await embedding_service.get_image_embedding(merged_image)
-        
-        # Upload merged image to S3
-        print(f"Uploading merged image to S3...")
-        merged_image_id = uuid.uuid4().hex
-        s3_key = f"users/{user_id}/merged_images/{merged_image_id}.jpg"
-        
-        # Convert PIL Image to bytes
-        image_bytes = BytesIO()
-        merged_image.save(image_bytes, format="JPEG")
-        image_bytes.seek(0)
-        
-        # Upload to S3
-        s3_service.upload_image(image_bytes.read(), s3_key, content_type="image/jpeg")
-        
-        # Generate presigned URL for the merged image
-        merged_image_url = s3_service.get_merged_image_url(s3_key)
-        merged_image_urls.append(merged_image_url)
-        
-        print(f"✅ Merged image uploaded to S3: {s3_key}")
-        
-        # Create ProductWithEmbedding
-        product_id = f"prod_{merged_image_id}"
-        product_with_embedding = ProductWithEmbedding.from_product(
-            product=selected_product,
-            embedding=embedding,
-            user_photo_url=selected_user_photo,
-            product_id=product_id,
-        )
-        product_with_embedding.merged_image_url = merged_image_url
-        
-        styled_products.append(product_with_embedding)
-        
-        # Store ProductEmbedding in database
+    # Merge 2 products: random user photo × first 2 products (in parallel)
+    async def process_product(product_idx: int, product: Product) -> Optional[ProductWithEmbedding]:
+        """Process a single product: merge, generate embedding, upload to S3, and store in DB."""
         try:
-            await create_product_embedding(
-                product=product_with_embedding,
-                user_id=user_id,
-                merged_image_s3_key=s3_key,
-                merged_image_url=merged_image_url,
+            print(f"🔄 Processing product {product_idx + 1}/{len(selected_products)} in parallel...")
+            
+            # Merge user photo with product image (Google Gemini call)
+            merged_image = await image_merging_service.merge_images(
+                selected_user_photo, product.image
             )
-            print(f"✅ ProductEmbedding stored in database")
-        except Exception as db_error:
-            print(f"⚠️ Warning: Failed to store ProductEmbedding in database: {db_error}")
+            
+            # Generate embedding for merged image
+            embedding = await embedding_service.get_image_embedding(merged_image)
+            
+            # Upload merged image to S3
+            merged_image_id = uuid.uuid4().hex
+            s3_key = f"users/{user_id}/merged_images/{merged_image_id}.jpg"
+            
+            # Convert PIL Image to bytes
+            image_bytes = BytesIO()
+            merged_image.save(image_bytes, format="JPEG")
+            image_bytes.seek(0)
+            
+            # Upload to S3
+            s3_service.upload_image(image_bytes.read(), s3_key, content_type="image/jpeg")
+            
+            # Generate presigned URL for the merged image
+            merged_image_url = s3_service.get_merged_image_url(s3_key)
+            
+            print(f"✅ Product {product_idx + 1} merged and uploaded to S3: {s3_key}")
+            
+            # Create ProductWithEmbedding
+            product_id = f"prod_{merged_image_id}"
+            product_with_embedding = ProductWithEmbedding.from_product(
+                product=product,
+                embedding=embedding,
+                user_photo_url=selected_user_photo,
+                product_id=product_id,
+            )
+            product_with_embedding.merged_image_url = merged_image_url
+            
+            # Store ProductEmbedding in database
+            try:
+                await create_product_embedding(
+                    product=product_with_embedding,
+                    user_id=user_id,
+                    merged_image_s3_key=s3_key,
+                    merged_image_url=merged_image_url,
+                )
+                print(f"✅ ProductEmbedding {product_idx + 1} stored in database")
+            except Exception as db_error:
+                print(f"⚠️ Warning: Failed to store ProductEmbedding {product_idx + 1} in database: {db_error}")
+                import traceback
+                traceback.print_exc()
+            
+            return product_with_embedding
+            
+        except Exception as e:
+            print(f"❌ Error processing product {product_idx + 1}: {e}")
             import traceback
             traceback.print_exc()
-        
-    except Exception as e:
-        print(f"❌ Error processing images: {e}")
-        import traceback
-        traceback.print_exc()
-        styled_products = []
-        merged_image_urls = []
+            return None
+    
+    # Process all products in parallel
+    print(f"🚀 Starting parallel processing of {len(selected_products)} products...")
+    tasks = [
+        process_product(product_idx, product) 
+        for product_idx, product in enumerate(selected_products)
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Filter out None results and exceptions
+    styled_products = []
+    merged_image_urls = []
+    for idx, result in enumerate(results):
+        if isinstance(result, Exception):
+            print(f"❌ Task {idx + 1} raised exception: {result}")
+            continue
+        if result is not None:
+            styled_products.append(result)
+            merged_image_urls.append(result.merged_image_url)
+    
+    print(f"✅ Successfully processed {len(styled_products)}/{len(selected_products)} products")
 
     if not styled_products:
         return {

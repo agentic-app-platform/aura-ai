@@ -12,16 +12,17 @@ from app.schema import User
 from app.state import UserProfile
 
 
-async def create_user(user_id: str, username: str) -> User:
+async def create_user(username: str, user_id: Optional[str] = None) -> User:
     """
-    Create a new user in PostgreSQL with username and user_id.
+    Create a new user in PostgreSQL with username.
+    User ID is auto-generated if not provided.
     All other fields are empty initially.
     
     If user with same username already exists, returns existing user instead.
 
     Args:
-        user_id: User identifier
-        username: Username
+        username: Username (required)
+        user_id: Optional user identifier. If not provided, generates one automatically.
 
     Returns:
         Created User object (or existing user if username already exists)
@@ -31,6 +32,11 @@ async def create_user(user_id: str, username: str) -> User:
         existing_user = await get_user(username=username)
         if existing_user:
             return existing_user
+        
+        # Generate user_id if not provided
+        if not user_id:
+            import uuid
+            user_id = f"user_{uuid.uuid4().hex[:8]}"
         
         # Create new user
         user = User(user_id=user_id, username=username)

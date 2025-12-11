@@ -8,12 +8,12 @@ from contextlib import asynccontextmanager
 # Removed: AsyncPostgresSaver - we now use only AgentStateTable
 # Removed: AsyncConnectionPool - not needed since we use MemorySaver
 
-from fastapi import FastAPI, HTTPException, Query, Form, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, Form, UploadFile, File, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from typing import Optional
 import httpx
-import json
+import json as JSON
 import asyncio
 
 from api_models import ChatRequest, ChatResponse
@@ -126,14 +126,10 @@ async def health():
 async def login(request: LoginRequest):
     """Login endpoint - creates user if doesn't exist, returns user profile."""
     try:
-        user = await get_user(request.username)
+        user = await get_user(username=request.username)
         if not user:
-            # Create new user
-            user = await create_user(
-                username=request.username,
-                email=request.email,
-                password_hash="",  # No password for now
-            )
+            # Create new user with auto-generated user_id
+            user = await create_user(username=request.username)
         
         # Convert to profile
         profile = user_to_profile(user)
@@ -177,36 +173,109 @@ async def get_user_profile(username: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put("/api/user/{username}", response_model=UpdateResponse)
+@app.put("/api/update/{username}", response_model=UpdateResponse)
 async def update_user(
     username: str,
-    request: UpdateRequest,
-    background_tasks: BackgroundTasks,
+    request: Request,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
-    """Update user profile."""
+    """Update user profile. Accepts both JSON and FormData."""
     try:
-        user = await get_user(username)
+        user = await get_user(username=username)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        # Update user profile
+        # Check content type and parse accordingly
+        content_type = request.headers.get("content-type", "")
+        
+        if "application/json" in content_type:
+            # Parse JSON body
+            body = await request.json()
+            upper_body_size = body.get("upper_body_size")
+            lower_body_size = body.get("lower_body_size")
+            region = body.get("region")
+            gender = body.get("gender")
+            age_group = body.get("age_group")
+            photo_urls = body.get("photo_urls")
+            query_filters = body.get("query_filters")
+            liked_items = body.get("liked_items")
+        else:
+            # Parse FormData
+            form_data = await request.form()
+            upper_body_size = form_data.get("upper_body_size")
+            lower_body_size = form_data.get("lower_body_size")
+            region = form_data.get("region")
+            gender = form_data.get("gender")
+            age_group = form_data.get("age_group")
+            photo_urls = form_data.get("photo_urls")
+            query_filters = form_data.get("query_filters")
+            liked_items = form_data.get("liked_items")
+            
+            # Convert to strings if they're UploadFile objects (shouldn't happen, but safe)
+            if upper_body_size and hasattr(upper_body_size, 'read'):
+                upper_body_size = None
+            if lower_body_size and hasattr(lower_body_size, 'read'):
+                lower_body_size = None
+            if region and hasattr(region, 'read'):
+                region = None
+            if gender and hasattr(gender, 'read'):
+                gender = None
+            if age_group and hasattr(age_group, 'read'):
+                age_group = None
+        
+        # Parse JSON strings from FormData (handle empty strings)
+        parsed_photo_urls = None
+        if photo_urls:
+            if isinstance(photo_urls, str) and photo_urls.strip():
+                try:
+                    parsed_photo_urls = JSON.loads(photo_urls)
+                except Exception as e:
+                    print(f"Warning: Failed to parse photo_urls JSON: {e}")
+            elif isinstance(photo_urls, list):
+                parsed_photo_urls = photo_urls
+        
+        parsed_query_filters = None
+        if query_filters:
+            if isinstance(query_filters, str) and query_filters.strip():
+                try:
+                    parsed_query_filters = JSON.loads(query_filters)
+                except Exception as e:
+                    print(f"Warning: Failed to parse query_filters JSON: {e}")
+            elif isinstance(query_filters, dict):
+                parsed_query_filters = query_filters
+        
+        parsed_liked_items = None
+        if liked_items:
+            if isinstance(liked_items, str) and liked_items.strip():
+                try:
+                    parsed_liked_items = JSON.loads(liked_items)
+                except Exception as e:
+                    print(f"Warning: Failed to parse liked_items JSON: {e}")
+            elif isinstance(liked_items, list):
+                parsed_liked_items = liked_items
+        
+        # Update user profile (only include fields that are provided and not empty)
         profile_updates = {}
-        if request.email is not None:
-            profile_updates["email"] = request.email
-        if request.photo_urls is not None:
-            profile_updates["photo_urls"] = request.photo_urls
-        if request.upper_body_size is not None:
-            profile_updates["upper_body_size"] = request.upper_body_size
-        if request.lower_body_size is not None:
-            profile_updates["lower_body_size"] = request.lower_body_size
-        if request.region is not None:
-            profile_updates["region"] = request.region
-        if request.gender is not None:
-            profile_updates["gender"] = request.gender
-        if request.age_group is not None:
-            profile_updates["age_group"] = request.age_group
-        if request.query_filters is not None:
-            profile_updates["query_filters"] = request.query_filters
+        if parsed_photo_urls is not None:
+            profile_updates["photo_urls"] = parsed_photo_urls
+        if upper_body_size and str(upper_body_size).strip():
+            profile_updates["upper_body_size"] = str(upper_body_size).strip()
+        if lower_body_size and str(lower_body_size).strip():
+            profile_updates["lower_body_size"] = str(lower_body_size).strip()
+        if region and str(region).strip():
+            profile_updates["region"] = str(region).strip()
+        if gender and str(gender).strip():
+            profile_updates["gender"] = str(gender).strip()
+        if age_group and str(age_group).strip():
+            profile_updates["age_group"] = str(age_group).strip()
+        if parsed_query_filters is not None:
+            profile_updates["query_filters"] = parsed_query_filters
+        if parsed_liked_items is not None:
+            profile_updates["liked_items"] = parsed_liked_items
+        
+        # If no updates provided, return error
+        if not profile_updates:
+            raise HTTPException(status_code=400, detail="No valid fields provided for update")
         
         updated_user = await update_user_profile(
             user_id=user.user_id,
@@ -309,6 +378,31 @@ async def get_image_proxy(
         raise HTTPException(status_code=500, detail=f"Error proxying image: {str(e)}")
 
 
+async def _generate_and_store_user_embeddings(
+    user_id: str, photo_urls: list, user_embedding_service
+):
+    """
+    Background task to generate and store user embeddings from photos.
+    """
+    try:
+        print(f"🔄 Generating embeddings for user {user_id}...")
+        user_embeddings = await user_embedding_service.update_user_embeddings_from_photos(
+            user_id=user_id,
+            photo_urls=photo_urls,
+        )
+        
+        # Store embeddings in user profile
+        await update_user_profile(
+            user_id=user_id,
+            profile_updates={"user_embeddings": user_embeddings.model_dump()},
+        )
+        print(f"✅ Successfully generated and stored embeddings for user {user_id}")
+    except Exception as e:
+        print(f"❌ Error generating embeddings for user {user_id}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 @app.post("/api/upload")
 async def upload_file(
     username: str = Form(...),
@@ -345,7 +439,7 @@ async def upload_file(
             if isinstance(current_photos, str):
                 import json
                 try:
-                    current_photos = json.loads(current_photos)
+                    current_photos = JSON.loads(current_photos)
                 except:
                     current_photos = []
             if not isinstance(current_photos, list):
@@ -361,11 +455,16 @@ async def upload_file(
                 profile_updates={"photo_urls": updated_photos},
             )
             
-            # TODO: Update embeddings in background when UserService method is implemented
-            # background_tasks.add_task(
-            #     user_service_instance.update_user_embeddings,
-            #     user.user_id,
-            # )
+            # Generate user embeddings from photos in background
+            from app.services.user_embedding_service import UserEmbeddingService
+            user_embedding_service = UserEmbeddingService()
+            
+            background_tasks.add_task(
+                _generate_and_store_user_embeddings,
+                user.user_id,
+                updated_photos,
+                user_embedding_service,
+            )
             
             # Return updated user object (frontend expects this format)
             from app.dao.user_dao import user_to_profile
@@ -409,7 +508,7 @@ async def delete_image(username: str, s3_key: str):
             if isinstance(photo_urls, str):
                 import json
                 try:
-                    photo_urls = json.loads(photo_urls)
+                    photo_urls = JSON.loads(photo_urls)
                 except:
                     photo_urls = []
             if not isinstance(photo_urls, list):
@@ -684,13 +783,62 @@ async def chat(request: ChatRequest):
         )
 
     try:
+        # Validate user has photos before allowing chat
+        user_id = request.user_id
+        
+        # Try to get user by user_id first, then fallback to username
+        user = await get_user(user_id=user_id)
+        
+        # If not found by user_id, try extracting username (for backward compatibility)
+        if not user:
+            username = user_id.replace("user_", "") if user_id.startswith("user_") else user_id
+            user = await get_user(username=username)
+        
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found. Please login again."
+            )
+        
+        # Update user_id to match the actual user_id from database
+        user_id = user.user_id
+        username = user.username
+        
+        # Check if user has photos (frontend already validates, but backend check for security)
+        photo_urls = []
+        if user.photo_urls:
+            if isinstance(user.photo_urls, str):
+                try:
+                    photo_urls = JSON.loads(user.photo_urls)
+                except Exception as e:
+                    print(f"⚠️  Warning: Failed to parse photo_urls JSON for user {user_id}: {e}")
+                    photo_urls = []
+            elif isinstance(user.photo_urls, list):
+                photo_urls = user.photo_urls
+        
+        # Log for debugging
+        print(f"🔍 User {user_id} (username: {username}) photo check: photo_urls type={type(user.photo_urls)}, count={len(photo_urls) if photo_urls else 0}")
+        
+        if not photo_urls or len(photo_urls) == 0:
+            # Since frontend already validates, this shouldn't happen, but log it
+            print(f"⚠️  Warning: User {user_id} reached chat endpoint without photos. Frontend validation may have failed.")
+            raise HTTPException(
+                status_code=403,
+                detail="Please upload at least one photo before starting a chat. Go to your dashboard to upload photos."
+            )
+        
+        # Check if user embeddings exist (they should be generated after photo upload)
+        # If not, generate them synchronously (or return error asking to wait)
+        if not user.user_embeddings:
+            # Embeddings might still be generating in background
+            # For now, we'll allow chat but ranking won't work optimally
+            print(f"⚠️  User {user_id} has photos but no embeddings yet. They may still be generating.")
+        
         # Generate thread_id if not provided
         thread_id = request.thread_id or f"thread_{uuid.uuid4().hex[:8]}"
         
         # Create/update UserChat entry when chat is accessed
         from app.dao.user_chat_dao import create_user_chat
-        user_id = request.user_id
-        username = user_id.replace("user_", "") if user_id.startswith("user_") else user_id
         await create_user_chat(
             username=username,
             chat_room_id=thread_id,
@@ -730,7 +878,6 @@ async def chat(request: ChatRequest):
         request_id = f"req_{uuid.uuid4().hex[:8]}"
 
         # Load user profile from User table using user_id
-        from app.dao.user_dao import get_user, user_to_profile
         user_record = await get_user(user_id=user_id)
         
         # Convert User to UserProfile
@@ -776,7 +923,7 @@ async def chat(request: ChatRequest):
             elif isinstance(messages_data, str):
                 import json
                 try:
-                    messages_list = json.loads(messages_data)
+                    messages_list = JSON.loads(messages_data)
                     for msg_data in messages_list:
                         if isinstance(msg_data, dict):
                             msg_type = msg_data.get("type", "").lower()
@@ -788,22 +935,8 @@ async def chat(request: ChatRequest):
                 except:
                     existing_messages = []
         
-        # Load user profile from User table using user_id
-        from app.dao.user_dao import get_user, user_to_profile
-        user_record = await get_user(user_id=user_id)
-        
-        # Convert User to UserProfile
-        user_profile = None
-        if user_record:
-            user_profile = user_to_profile(user_record)
-            print(f"✅ Loaded user profile for user_id {user_id} with {len(user_profile.get('photo_urls', []))} photos")
-        else:
-            print(f"⚠️  Warning: User with user_id {user_id} not found in database")
-            # Create minimal user_profile even if user doesn't exist
-            user_profile = {
-                "user_id": user_id,
-                "photo_urls": [],
-            }
+        # User profile already loaded above (lines 796-810), skip duplicate loading
+        # user_profile is already set from the first load above
         
         # Add new user message to the conversation history
         # This will be stored in agent state messages via LangGraph's add_messages reducer
