@@ -173,10 +173,35 @@ async def ranking_agent(
     # Reorder products based on ranking
     ranked_products = [styled_products[idx] for idx in ranked_indices]
 
+    # Create message with ranked_products in additional_kwargs
+    import numpy as np
+    products_data = []
+    for product in ranked_products:
+        embedding = product.embedding
+        if isinstance(embedding, np.ndarray):
+            embedding = embedding.tolist()
+        elif hasattr(embedding, 'tolist'):
+            embedding = embedding.tolist()
+        
+        products_data.append({
+            "id": product.id,
+            "image": product.image,
+            "price": product.price,
+            "link": product.link,
+            "rating": product.rating,
+            "title": product.title,
+            "source": product.source,
+            "reviews": product.reviews,
+            "merged_image_url": product.merged_image_url,
+            "user_photo_url": product.user_photo_url,
+            "embedding": embedding,
+        })
+    
     return {
         "messages": [
             AIMessage(
-                content=f"I've ranked {len(ranked_products)} products based on your preferences and style. Here are the top recommendations."
+                content=f"I've ranked {len(ranked_products)} products based on your preferences and style. Here are the top recommendations.",
+                additional_kwargs={"ranked_products": products_data}
             )
         ],
         "current_agent": "ranking_agent",
