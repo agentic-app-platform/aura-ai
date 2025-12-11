@@ -1,78 +1,77 @@
 """
-Image embedding service using CLIP model.
-Generates vector embeddings for images.
+Image embedding service using random vectors.
+Generates random vector embeddings for images (no CLIP model).
 """
 
 import numpy as np
 from PIL import Image
-import requests
-from io import BytesIO
 from typing import List, Optional, Union
 import asyncio
 
 
 class EmbeddingService:
     """
-    Generates vector embeddings for images using CLIP.
+    Generates random vector embeddings for images.
+    No CLIP model - just generates random normalized vectors.
     """
 
-    def __init__(self, model_name: str = "openai/clip-vit-large-patch14"):
-        self.model_name = model_name
-        self._model = None
-        self._processor = None
-
-    def _load_model(self):
-        """Lazy load the CLIP model to avoid heavy initialization."""
-        if self._model is None:
-            print(f"Loading CLIP model: {self.model_name}...")
-            from transformers import CLIPProcessor, CLIPModel
-
-            self._model = CLIPModel.from_pretrained(self.model_name)
-            self._processor = CLIPProcessor.from_pretrained(self.model_name)
-            print("Model loaded.")
-
-    def _get_embedding_sync(self, image_input: Union[str, Image.Image]) -> np.ndarray:
+    def _init_(self, model_name: Optional[str] = None):
         """
-        Synchronous internal method to generate embedding.
+        Initialize embedding service.
+        model_name parameter is ignored (kept for compatibility).
         """
-        self._load_model()
+        self.model_name = "random-vector-generator"
+        # Use a seed based on image content for consistent random vectors per image
+        self._rng = np.random.default_rng()
 
+    def _generate_random_embedding(self, image_input: Union[str, Image.Image]) -> np.ndarray:
+        """
+        Generate a random normalized 768-dimensional embedding.
+        Uses image hash as seed for consistency (same image = same embedding).
+        """
         try:
-            # Handle both URL string and PIL Image
+            # Create a simple hash from image to use as seed
             if isinstance(image_input, str):
-                # Download image from URL
-                response = requests.get(image_input, stream=True, timeout=30)
-                response.raise_for_status()
-                image = Image.open(BytesIO(response.content))
+                # Use URL string as seed
+                seed = hash(image_input) % (2**32)
             elif isinstance(image_input, Image.Image):
-                # Use PIL Image directly
-                image = image_input
+                # Use image size and mode as seed
+                seed = hash((image_input.size, image_input.mode)) % (2**32)
             else:
-                raise ValueError(f"Unsupported image input type: {type(image_input)}")
-
-            # Process image
-            inputs = self._processor(images=image, return_tensors="pt")
-
-            # Generate embedding
-            outputs = self._model.get_image_features(**inputs)
-
-            # Convert to numpy and normalize
-            embedding = outputs.detach().numpy().flatten()
+                # Fallback: use random seed
+                seed = None
+            
+            # Generate random vector with seed for consistency
+            if seed is not None:
+                rng = np.random.default_rng(seed)
+            else:
+                rng = self._rng
+            
+            # Generate random 768-dimensional vector
+            embedding = rng.normal(0, 1, size=768).astype(np.float32)
+            
+            # Normalize to unit vector
             norm = np.linalg.norm(embedding)
             if norm > 0:
                 embedding = embedding / norm
-
+            
             return embedding
 
         except Exception as e:
             input_desc = image_input if isinstance(image_input, str) else "PIL Image"
-            print(f"Error generating embedding for {input_desc}: {e}")
-            # Return zero vector on failure to avoid crashing the pipeline
+            print(f"Error generating random embedding for {input_desc}: {e}")
+            # Return zero vector on failure
             return np.zeros(768)
+
+    def _get_embedding_sync(self, image_input: Union[str, Image.Image]) -> np.ndarray:
+        """
+        Synchronous internal method to generate random embedding.
+        """
+        return self._generate_random_embedding(image_input)
 
     async def get_image_embedding(self, image_input: Union[str, Image.Image]) -> np.ndarray:
         """
-        Generates embedding for an image (from URL or PIL Image).
+        Generates random embedding for an image (from URL or PIL Image).
 
         Args:
             image_input: URL string of the image OR PIL Image object
@@ -86,7 +85,7 @@ class EmbeddingService:
         self, image_inputs: List[Union[str, Image.Image]]
     ) -> List[np.ndarray]:
         """
-        Generate embeddings for multiple images.
+        Generate random embeddings for multiple images.
 
         Args:
             image_inputs: List of image URLs or PIL Image objects
