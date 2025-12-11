@@ -45,6 +45,10 @@ jobs:
       - name: Configure Docker for GCR
         run: gcloud auth configure-docker --quiet
 
+      - name: Create GCP credentials file
+        run: |
+          echo "${{ secrets.GCP_CREDENTIALS_BASE64 }}" | base64 --decode > aura-ai-sa-key.json
+
       - name: Build Docker image
         run: |
           docker build -t ${{ env.IMAGE }}:${{ github.sha }} .
