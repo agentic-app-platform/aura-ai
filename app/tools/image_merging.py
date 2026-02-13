@@ -12,7 +12,6 @@ from io import BytesIO
 import asyncio
 
 from google import genai
-from google.oauth2.service_account import Credentials
 
 from app.config import GOOGLE_VERTEX_AI_PROJECT_ID
 
@@ -25,36 +24,62 @@ class ImageMergingService:
     def __init__(self):
         """
         Initialize the image merging service.
-        Uses credentials from aura-ai-sa-key.json file.
+        
+        Authentication priority:
+        1. Application Default Credentials (ADC) - used in Cloud Run automatically
+        2. Service account file (aura-ai-sa-key.json) - for local development
+        3. GOOGLE_API_KEY environment variable - API key auth
         """
-        # Get project root directory
+        self.project_id = "high-torch-480505-c4"
+        self.credentials = None
+        
+        # Try to initialize credentials
+        # Method 1: Check for service account file (local development)
         project_root = Path(__file__).parent.parent.parent
         cred_path = project_root / "aura-ai-sa-key.json"
         
-        if not cred_path.exists():
-            raise FileNotFoundError(
-                f"Credentials file not found at {cred_path}. "
-                "Please ensure aura-ai-sa-key.json exists in the project root."
+        if cred_path.exists():
+            # Use service account file for local development
+            from google.oauth2.service_account import Credentials
+            self.credentials = Credentials.from_service_account_file(
+                str(cred_path),
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
+            print("✅ Using service account credentials from file")
+        else:
+            # Method 2: Use Application Default Credentials (Cloud Run provides these automatically)
+            # No explicit credentials needed - google.auth.default() will be used
+            print("✅ Using Application Default Credentials (ADC)")
         
-        # Initialize credentials and client
-        self.credentials = Credentials.from_service_account_file(
-            str(cred_path),
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-        
-        self.project_id = GOOGLE_VERTEX_AI_PROJECT_ID
-        if not self.project_id:
-            raise ValueError(
-                "GOOGLE_VERTEX_AI_PROJECT_ID environment variable is not set. "
-                "Please set it in your .env file."
-            )
-        
-        self.client = genai.Client(
-            vertexai=True,
-            project=self.project_id,
-            credentials=self.credentials,
-        )
+        # Initialize the client
+        if self.project_id:
+            # Use Vertex AI with project ID
+            if self.credentials:
+                self.client = genai.Client(
+                    vertexai=True,
+                    project=self.project_id,
+                    credentials=self.credentials,
+                )
+            else:
+                # Let ADC handle authentication (Cloud Run automatically provides credentials)
+                self.client = genai.Client(
+                    vertexai=True,
+                    project=self.project_id,
+                )
+            print(f"✅ Initialized Gemini client with Vertex AI (project: {self.project_id})")
+        else:
+            # Fallback: Use API key if no project ID
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if api_key:
+                self.client = genai.Client(api_key=api_key)
+                print("✅ Initialized Gemini client with API key")
+            else:
+                raise ValueError(
+                    "No Google credentials found. Please set one of:\n"
+                    "1. GOOGLE_VERTEX_AI_PROJECT_ID (for Vertex AI with ADC)\n"
+                    "2. GOOGLE_API_KEY (for API key authentication)\n"
+                    "3. Place aura-ai-sa-key.json in project root (for local development)"
+                )
         
         self.model_name = "gemini-3-pro-image-preview"
         self.text_prompt = """You are a virtual try on assistant. You are given a user image (first image) and a product image (second image). You need to generate a realistic image of the user(first image) wearing the product(second image)."""
